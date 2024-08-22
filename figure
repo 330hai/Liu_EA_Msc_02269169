@@ -1,0 +1,446 @@
+library(ggplot2)
+library(gghalves)
+library(dplyr)
+library(ggsignif)
+library(lmerTest)
+
+#pollen
+# 提取固定效应系数
+fixed_effects <- summary(model_pollen_rate_interaction)$coefficients
+print(fixed_effects)
+# 提取每个固定效应的置信区间
+conf_intervals <- confint(model_pollen_rate_interaction, level =0.95)# 使用 car::Anova 提取 p 值
+anova_results <- Anova(model_pollen_rate_interaction, type ="III")
+fixed_effects_pvalues <- anova_results$`Pr(>Chisq)`
+
+# 提取随机效应的方差贡献
+random_effects <- summary(model_pollen_rate_interaction)$varcor
+
+# 提取模型的 AIC 和 R²
+model_aic <- AIC(model_pollen_rate_interaction)
+model_r_squared <- r.squaredGLMM(model_pollen_rate_interaction)# 将提取的置信区间、系数和 p 值保存为数据框
+model_summary_df <- as.data.frame(fixed_effects)# 提取固定效应对应的置信区间
+fixed_effects_conf_intervals <- conf_intervals[rownames(model_summary_df),]# 将置信区间合并到固定效应数据框中
+model_summary_df$conf_low <- fixed_effects_conf_intervals[,"2.5 %"]
+model_summary_df$conf_high <- fixed_effects_conf_intervals[,"97.5 %"]
+
+model_summary_df$p_value <- fixed_effects_pvalues
+
+# 保留感兴趣的固定效应（包括截距和相关处理组）
+model_summary_df <- model_summary_df[grep("Intercept|treatment|week", rownames(model_summary_df)),]# 查看提取的结果
+print(model_summary_df)
+
+
+# 整合数据
+week1_summary_filter <- week1_summary %>%
+  filter(event_count >= 40)
+week2_summary_filter <- week2_summary %>%
+  filter(event_count >= 40)
+week3_summary_filter <- week3_summary %>%
+  filter(event_count >= 40)
+week4_summary_filter <- week4_summary %>%
+  filter(event_count >= 40)
+
+
+week1_summary_filter <- week1_summary_filter %>% mutate(week = "Week 1")
+week2_summary_filter <- week2_summary_filter %>% mutate(week = "Week 2")
+week3_summary_filter <- week3_summary_filter %>% mutate(week = "Week 3")
+week4_summary_filter <- week4_summary_filter %>% mutate(week = "Week 4")
+
+# 合并所有周的数据
+all_data <- bind_rows(week1_summary_filter, week2_summary_filter, week3_summary_filter, week4_summary_filter)
+
+# 计算每个处理组在每个周的平均值
+group_means <- all_data %>%
+  group_by(treatment, week) %>%
+  summarise(mean_pollen_carrying_rate = mean(pollen_carrying_rate))
+
+# 绘制整合所有周次的图形
+p <- ggplot(all_data, aes(x = interaction(treatment, week), y = pollen_carrying_rate)) +
+  geom_half_violin(aes(fill = treatment), side = "r", trim = FALSE, position = position_nudge(x = 0.03)) +
+  geom_half_point(aes(color = treatment), side = "l", position = position_nudge(x = -0.03), size = 2) +
+  geom_boxplot(aes(fill = treatment), width = 0.12, position = position_nudge(x = 0.03), alpha = 0.4, color = "black") +
+  scale_fill_manual(values = c("Control" = "#D9B9D4", "Prothio" = "#AEB2D1", "Strep" = "#B3D1ED")) +
+  scale_color_manual(values = c("Control" = "#D9B9D4", "Prothio" = "#AEB2D1", "Strep" = "#B3D1ED")) +
+  labs(x = "Treatment - Week", y = "Pollen Carrying Rate") +
+  theme_light() +
+  theme(
+    panel.grid.minor = element_blank(), # 隐藏辅助网格线
+    panel.grid.major = element_blank(),
+    axis.ticks.length = unit(-0.25, "cm"), # 将刻度线朝内
+    legend.position = "right",
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  ) +
+  geom_point(data = group_means, aes(x = interaction(treatment, week), y = mean_pollen_carrying_rate),
+             color = "darkred", size = 3, shape = 18) + # 额外的平均值
+  expand_limits(y = c(0, 1.25)) # 统一 y 轴范围
+
+# 提取显著性桥的 p 值
+week_1_prothio_p_value <- sprintf("p = %.3e", model_summary_df["treatmentProthio", "p_value"])
+week_1_strep_p_value <- sprintf("p = %.3e", model_summary_df["treatmentStrep", "p_value"])
+week_2_prothio_p_value <- sprintf("p = %.3e", model_summary_df["treatmentProthio:factor(week)2", "p_value"])
+week_2_strep_p_value <- sprintf("p = %.3e", model_summary_df["treatmentStrep:factor(week)2", "p_value"])
+week_3_prothio_p_value <- sprintf("p = %.3e", model_summary_df["treatmentProthio:factor(week)3", "p_value"])
+week_3_strep_p_value <- sprintf("p = %.3e", model_summary_df["treatmentStrep:factor(week)3", "p_value"])
+week_4_prothio_p_value <- sprintf("p = %.3e", model_summary_df["treatmentProthio:factor(week)4", "p_value"])
+week_4_strep_p_value <- sprintf("p = %.3e", model_summary_df["treatmentStrep:factor(week)4", "p_value"])
+
+# 动态生成注释文本并应用到显著性桥上
+p1 <- p + 
+  geom_signif(
+    comparisons = list(c("Control.Week 1", "Prothio.Week 1"), c("Control.Week 1", "Strep.Week 1")),
+    annotations = c(week_1_prothio_p_value, week_1_strep_p_value),
+    y_position = c(1.1, 1.2),
+    tip_length = 0.02
+  ) +
+  geom_signif(
+    comparisons = list(c("Control.Week 2", "Prothio.Week 2"), c("Control.Week 2", "Strep.Week 2")),
+    annotations = c(week_2_prothio_p_value, week_2_strep_p_value),
+    y_position = c(1.3, 1.4),
+    tip_length = 0.02
+  ) +
+  geom_signif(
+    comparisons = list(c("Control.Week 3", "Prothio.Week 3"), c("Control.Week 3", "Strep.Week 3")),
+    annotations = c(week_3_prothio_p_value, week_3_strep_p_value),
+    y_position = c(1.5, 1.6),
+    tip_length = 0.02
+  ) +
+  geom_signif(
+    comparisons = list(c("Control.Week 4", "Prothio.Week 4"), c("Control.Week 4", "Strep.Week 4")),
+    annotations = c(week_4_prothio_p_value, week_4_strep_p_value),
+    y_position = c(1.7, 1.8),
+    tip_length = 0.02
+  )
+
+# 显示最终图形
+print(p1)
+
+# 提取估计值（Estimate）
+estimate_values <- c(
+  # Control 组
+  model_summary_df["(Intercept)", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["factor(week)2", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["factor(week)3", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["factor(week)4", "Estimate"],
+  
+  # Prothio 组
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentProthio", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentProthio", "Estimate"] + model_summary_df["factor(week)2", "Estimate"] + model_summary_df["treatmentProthio:factor(week)2", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentProthio", "Estimate"] + model_summary_df["factor(week)3", "Estimate"] + model_summary_df["treatmentProthio:factor(week)3", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentProthio", "Estimate"] + model_summary_df["factor(week)4", "Estimate"] + model_summary_df["treatmentProthio:factor(week)4", "Estimate"],
+  
+  # Strep 组
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentStrep", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentStrep", "Estimate"] + model_summary_df["factor(week)2", "Estimate"] + model_summary_df["treatmentStrep:factor(week)2", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentStrep", "Estimate"] + model_summary_df["factor(week)3", "Estimate"] + model_summary_df["treatmentStrep:factor(week)3", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentStrep", "Estimate"] + model_summary_df["factor(week)4", "Estimate"] + model_summary_df["treatmentStrep:factor(week)4", "Estimate"]
+)
+
+# 打印估计值以确认
+print(estimate_values)
+
+# 提取置信区间下限（conf_low）
+conf_low_values <- c(
+  # Control 组
+  model_summary_df["(Intercept)", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["factor(week)2", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["factor(week)3", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["factor(week)4", "conf_low"],
+  
+  # Prothio 组
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentProthio", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentProthio", "conf_low"] + model_summary_df["factor(week)2", "conf_low"] + model_summary_df["treatmentProthio:factor(week)2", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentProthio", "conf_low"] + model_summary_df["factor(week)3", "conf_low"] + model_summary_df["treatmentProthio:factor(week)3", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentProthio", "conf_low"] + model_summary_df["factor(week)4", "conf_low"] + model_summary_df["treatmentProthio:factor(week)4", "conf_low"],
+  
+  # Strep 组
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentStrep", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentStrep", "conf_low"] + model_summary_df["factor(week)2", "conf_low"] + model_summary_df["treatmentStrep:factor(week)2", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentStrep", "conf_low"] + model_summary_df["factor(week)3", "conf_low"] + model_summary_df["treatmentStrep:factor(week)3", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentStrep", "conf_low"] + model_summary_df["factor(week)4", "conf_low"] + model_summary_df["treatmentStrep:factor(week)4", "conf_low"]
+)
+
+# 打印置信区间下限以确认
+print(conf_low_values)
+
+# 提取置信区间上限（conf_high）
+conf_high_values <- c(
+  # Control 组
+  model_summary_df["(Intercept)", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["factor(week)2", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["factor(week)3", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["factor(week)4", "conf_high"],
+  
+  # Prothio 组
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentProthio", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentProthio", "conf_high"] + model_summary_df["factor(week)2", "conf_high"] + model_summary_df["treatmentProthio:factor(week)2", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentProthio", "conf_high"] + model_summary_df["factor(week)3", "conf_high"] + model_summary_df["treatmentProthio:factor(week)3", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentProthio", "conf_high"] + model_summary_df["factor(week)4", "conf_high"] + model_summary_df["treatmentProthio:factor(week)4", "conf_high"],
+  
+  # Strep 组
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentStrep", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentStrep", "conf_high"] + model_summary_df["factor(week)2", "conf_high"] + model_summary_df["treatmentStrep:factor(week)2", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentStrep", "conf_high"] + model_summary_df["factor(week)3", "conf_high"] + model_summary_df["treatmentStrep:factor(week)3", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentStrep", "conf_high"] + model_summary_df["factor(week)4", "conf_high"] + model_summary_df["treatmentStrep:factor(week)4", "conf_high"]
+)
+
+# 打印置信区间上限以确认
+print(conf_high_values)
+
+# 构建最终的数据框
+ci_data <- data.frame(
+  week = rep(c("Week 1", "Week 2", "Week 3", "Week 4"), times = 3),
+  treatment = factor(rep(c("Control", "Prothio", "Strep"), each = 4)),
+  estimate = estimate_values,
+  conf_low = conf_low_values,
+  conf_high = conf_high_values
+)
+
+# 打印数据框以确认
+print(ci_data)
+
+
+# 修改置信区间图的绘制代码，隐藏 x 轴坐标，并将纵坐标改为百分比
+p2 <- ggplot(ci_data, aes(x = interaction(treatment, week), y = estimate * 100, color = treatment, group = treatment)) +
+  geom_errorbar(aes(ymin = conf_low * 100, ymax = conf_high * 100), width = 0.2, size = 1.1, position = position_dodge(width = 0.5)) +
+  geom_line(position = position_dodge(width = 0.5), linetype = "dashed", size = 1.1) +
+  geom_point(position = position_dodge(width = 0.5), size = 3) +
+  geom_jitter(data = all_data, aes(x = interaction(treatment, week), y = pollen_carrying_rate * 100), # 将实际数据点转换为百分比
+              width = 0.2, height = 0, alpha = 0.6, color = "black", size = 1) + # 调整数据点位置和样式
+  scale_color_manual(values = c("Control" = "#D9B9D4", "Prothio" = "#AEB2D1", "Strep" = "#B3D1ED")) +
+  labs(x = "Treatment - Week", y = "Pollen Carrying Rate (%)", color = "Treatment") +
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.length = unit(-0.25, "cm"),
+    legend.position = "right",
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  ) +
+  # 添加两条红色虚线表示 0% 和 100%
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", size = 0.5) +
+  geom_hline(yintercept = 100, linetype = "dashed", color = "red", size = 0.5)
+
+# 在图形下方添加简化后的注释
+p2 <- p2 + 
+  annotate("text", x = 6, y = -35, hjust = 1, vjust = 1, 
+           label = "R²(m) = 0.66, R²(c) = 0.75 | BP Test: p = 0.425 | Shapiro-Wilk: p = 0.160", 
+           size = 4, color = "black") +
+  theme(
+    plot.margin = margin(t = 10, r = 10, b = 40, l = 10)
+  )
+
+# 显示图形
+print(p2)
+
+#event
+# 提取固定效应系数
+fixed_effects <- summary(model_event_rate)$coefficients
+
+# 提取每个固定效应的置信区间
+conf_intervals <- confint(model_event_rate, level =0.95)# 使用 car::Anova 提取 p 值
+anova_results <- Anova(model_event_rate, type ="III")
+fixed_effects_pvalues <- anova_results$`Pr(>Chisq)`
+
+# 提取随机效应的方差贡献
+random_effects <- summary(model_event_rate)$varcor
+
+# 提取模型的 AIC 和 R²
+model_aic <- AIC(model_event_rate)
+model_r_squared <- r.squaredGLMM(model_event_rate)# 将提取的置信区间、系数和 p 值保存为数据框
+model_summary_df <- as.data.frame(fixed_effects)# 提取固定效应对应的置信区间
+fixed_effects_conf_intervals <- conf_intervals[rownames(model_summary_df),]# 将置信区间合并到固定效应数据框中
+model_summary_df$conf_low <- fixed_effects_conf_intervals[,"2.5 %"]
+model_summary_df$conf_high <- fixed_effects_conf_intervals[,"97.5 %"]
+
+model_summary_df$p_value <- fixed_effects_pvalues
+
+# 保留感兴趣的固定效应（包括截距和相关处理组）
+model_summary_df <- model_summary_df[grep("Intercept|treatment|week", rownames(model_summary_df)),]# 查看提取的结果
+print(model_summary_df)
+
+# 将事件速率转换为每分钟的速率（乘以60）
+all_data <- all_data %>%
+  mutate(event_rate_per_min = event_rate * 60)
+
+# 计算每个处理组在每个周的平均值（转换后的事件速率）
+group_means <- all_data %>%
+  group_by(treatment, week) %>%
+  summarise(mean_event_rate_per_min = mean(event_rate_per_min))
+
+p <- ggplot(all_data, aes(x = interaction(treatment, week), y = event_rate_per_min)) +
+  geom_half_violin(aes(fill = treatment), side = "r", trim = FALSE, position = position_nudge(x = 0.03)) +
+  geom_half_point(aes(color = treatment), side = "l", position = position_nudge(x = -0.03), size = 2) +
+  geom_boxplot(aes(fill = treatment), width = 0.12, position = position_nudge(x = 0.03), alpha = 0.4, color = "black") +
+  scale_fill_manual(values = c("Control" = "#D9B9D4", "Prothio" = "#AEB2D1", "Strep" = "#B3D1ED")) +
+  scale_color_manual(values = c("Control" = "#D9B9D4", "Prothio" = "#AEB2D1", "Strep" = "#B3D1ED")) +
+  labs(x = "Treatment - Week", y = "Event Rate (per minute)") +
+  theme_light() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    axis.ticks.length = unit(-0.25, "cm"),
+    legend.position = "right",
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  ) +
+  geom_point(data = group_means, aes(x = interaction(treatment, week), y = mean_event_rate_per_min),
+             color = "darkred", size = 3, shape = 18) +
+  expand_limits(y = c(0, max(all_data$event_rate_per_min) * 1.2))
+
+# 添加显著性桥，跨周次的比较
+p1 <- p +
+  geom_signif(
+    comparisons = list(c("Prothio.Week 1", "Prothio.Week 2"), 
+                       c("Prothio.Week 1", "Prothio.Week 3"),
+                       c("Prothio.Week 1", "Prothio.Week 4")),
+    annotations = c(
+      sprintf("p(week2) = %.2e", model_summary_df["factor(week)2", "p_value"]),
+      sprintf("p(week3) = %.2e", model_summary_df["factor(week)3", "p_value"]),
+      sprintf("p(week4) = %.2e", model_summary_df["factor(week)4", "p_value"])
+    ),
+    y_position = c(7.0, 7.5, 8.0),
+    tip_length = 0.02
+  ) +
+  geom_signif(
+    data = subset(all_data, week == "Week 1"), # 仅第一周的显著性测试
+    comparisons = list(c("Control.Week 1", "Prothio.Week 1"), c("Control.Week 1", "Strep.Week 1")),
+    annotations = c(
+      sprintf("p(Prothio) = %.2e", model_summary_df["treatmentProthio", "p_value"]),
+      sprintf("p(Strep) = %.2e", model_summary_df["treatmentStrep", "p_value"])
+    ),
+    y_position = c(4.1, 5.1), # 控制第一周桥的高度
+    tip_length = 0.02
+  )
+
+# 显示最终图形
+print(p1)
+
+
+
+
+# 提取估计值（Estimate）
+estimate_values <- c(
+  # Control 组
+  model_summary_df["(Intercept)", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["factor(week)2", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["factor(week)3", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["factor(week)4", "Estimate"],
+  
+  # Prothio 组
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentProthio", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentProthio", "Estimate"] + model_summary_df["factor(week)2", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentProthio", "Estimate"] + model_summary_df["factor(week)3", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentProthio", "Estimate"] + model_summary_df["factor(week)4", "Estimate"],
+  
+  # Strep 组
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentStrep", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentStrep", "Estimate"] + model_summary_df["factor(week)2", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentStrep", "Estimate"] + model_summary_df["factor(week)3", "Estimate"],
+  model_summary_df["(Intercept)", "Estimate"] + model_summary_df["treatmentStrep", "Estimate"] + model_summary_df["factor(week)4", "Estimate"]
+)
+
+# 打印估计值以确认
+print(estimate_values)
+
+# 提取置信区间下限（conf_low）
+conf_low_values <- c(
+  # Control 组
+  model_summary_df["(Intercept)", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["factor(week)2", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["factor(week)3", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["factor(week)4", "conf_low"],
+  
+  # Prothio 组
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentProthio", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentProthio", "conf_low"] + model_summary_df["factor(week)2", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentProthio", "conf_low"] + model_summary_df["factor(week)3", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentProthio", "conf_low"] + model_summary_df["factor(week)4", "conf_low"],
+  
+  # Strep 组
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentStrep", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentStrep", "conf_low"] + model_summary_df["factor(week)2", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentStrep", "conf_low"] + model_summary_df["factor(week)3", "conf_low"],
+  model_summary_df["(Intercept)", "conf_low"] + model_summary_df["treatmentStrep", "conf_low"] + model_summary_df["factor(week)4", "conf_low"]
+)
+
+# 打印置信区间下限以确认
+print(conf_low_values)
+
+# 提取置信区间上限（conf_high）
+conf_high_values <- c(
+  # Control 组
+  model_summary_df["(Intercept)", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["factor(week)2", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["factor(week)3", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["factor(week)4", "conf_high"],
+  
+  # Prothio 组
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentProthio", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentProthio", "conf_high"] + model_summary_df["factor(week)2", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentProthio", "conf_high"] + model_summary_df["factor(week)3", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentProthio", "conf_high"] + model_summary_df["factor(week)4", "conf_high"],
+  
+  # Strep 组
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentStrep", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentStrep", "conf_high"] + model_summary_df["factor(week)2", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentStrep", "conf_high"] + model_summary_df["factor(week)3", "conf_high"],
+  model_summary_df["(Intercept)", "conf_high"] + model_summary_df["treatmentStrep", "conf_high"] + model_summary_df["factor(week)4", "conf_high"]
+)
+
+# 打印置信区间上限以确认
+print(conf_high_values)
+
+# 构建最终的数据框
+ci_data <- data.frame(
+  week = rep(c("Week 1", "Week 2", "Week 3", "Week 4"), times = 3),
+  treatment = factor(rep(c("Control", "Prothio", "Strep"), each = 4)),
+  estimate = estimate_values,
+  conf_low = conf_low_values,
+  conf_high = conf_high_values
+)
+
+# 打印数据框以确认
+print(ci_data)
+
+
+
+
+# 将置信区间和估计值转换为每分钟的单位
+ci_data$estimate <- ci_data$estimate * 60
+ci_data$conf_low <- ci_data$conf_low * 60
+ci_data$conf_high <- ci_data$conf_high * 60
+
+# 直接使用科学记数法的值
+bp_p_value <- 2.022e-05
+
+# 生成注释文本
+annotation_text <- paste0("R²(m) = ", r_squared_m, ", R²(c) = ", r_squared_c, " | BP Test: p = ", bp_p_value, " | Shapiro-Wilk: p = ", shapiro_p_value)
+
+p2 <- ggplot(ci_data, aes(x = interaction(treatment, week), y = estimate, color = treatment, group = treatment)) +
+  geom_errorbar(aes(ymin = conf_low, ymax = conf_high), width = 0.2, size = 1.1, position = position_dodge(width = 0.5)) + # 调整误差条的宽度
+  geom_line(position = position_dodge(width = 0.5), linetype = "dashed", size = 1.1) + # 调整虚线的宽度
+  geom_point(position = position_dodge(width = 0.5), size = 3) +
+  geom_jitter(data = all_data, aes(x = interaction(treatment, week), y = event_rate_per_min), # 添加实际数据点
+              width = 0.2, height = 0, alpha = 0.6, color = "black", size = 1) + # 调整数据点位置和样式
+  scale_color_manual(values = c("Control" = "#D9B9D4", "Prothio" = "#AEB2D1", "Strep" = "#B3D1ED")) +
+  labs(x = "Treatment - Week", y = "Event Rate (per minute)", color = "Treatment") +
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.length = unit(-0.25, "cm"), # 将刻度线朝内
+    legend.position = "right",
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  ) +
+  expand_limits(y = c(0, max(all_data$event_rate_per_min) * 1.2)) + # 动态设置纵轴范围
+  annotate("text", x = 6, y = 6.5, hjust = 1, vjust = 1, # 动态调整 x 的位置
+           label = annotation_text,
+           size = 4, color = "black") +
+  theme(
+    plot.margin = margin(t = 10, r = 10, b = 40, l = 10)
+  )
+
+# 显示最终图形
+print(p2)
