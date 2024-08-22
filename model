@@ -1,0 +1,193 @@
+# 加载所需包
+library(lme4)
+library(car)
+library(multcomp)
+library(lmtest)
+library(MuMIn)
+library(lmerTest)
+
+#pollen
+# 计算新权重（观测数的平方根）(二选一)
+all_weeks_summary_weight <- all_weeks_summary %>%
+  mutate(new_weight = sqrt(event_count))
+# 筛选事件数大于或等于40的数据(二选一)
+all_weeks_summary_filter <- all_weeks_summary %>%
+  filter(event_count >= 40)
+
+# 使用新的权重拟合包含交互效应的模型
+model_pollen_rate_interaction <- lmerTest::lmer(
+  pollen_carrying_rate ~ treatment * factor(week) + 
+    (1 | WGT/Colony.no.) + 
+    (1 | Air_Temp_Avg) + 
+    (1 | `RH (%) [Smp]`) + 
+    (1 | `WS_kph_ (kilometers/hour) [Avg]`) + 
+    (1 | `SlrW_Avg (W/m^2) [Avg]`),
+  data = all_weeks_summary_filter
+)
+
+# 查看模型摘要
+summary(model_pollen_rate_interaction)
+
+# 计算VIF
+pollen_rate_vif_values_interaction <- vif(model_pollen_rate_interaction)
+print(pollen_rate_vif_values_interaction)
+
+# 检查模型的残差分布（正态性）
+residuals_interaction <- resid(model_pollen_rate_interaction)
+shapiro_test_interaction <- shapiro.test(residuals_interaction)
+print(shapiro_test_interaction)
+
+# 绘制残差 QQ 图
+qqnorm(residuals_interaction)
+qqline(residuals_interaction, col = "red")
+
+# 得到拟合值
+fitted_values_interaction <- fitted(model_pollen_rate_interaction)
+
+# 构建线性模型对象，以便使用 bptest
+lm_model_interaction <- lm(residuals_interaction ~ fitted_values_interaction)
+
+# 执行 Breusch-Pagan 方差齐性检验
+bp_test_interaction <- bptest(lm_model_interaction)
+print(bp_test_interaction)
+
+# 计算 AIC 值以便与之前的模型进行比较
+pollen_aic_interaction <- AIC(model_pollen_rate_interaction)
+print(paste("AIC of interaction model:", pollen_aic_interaction))
+
+# 残差直方图
+hist(residuals_interaction, breaks = 20, main = "Histogram of Residuals", xlab = "Residuals")
+
+# 计算 R 方
+pollen_r_squared_interaction <- r.squaredGLMM(model_pollen_rate_interaction)
+print(pollen_r_squared_interaction)
+
+#event
+# 首先计算因变量：事件速率（事件数/观测时间）
+all_weeks_summary <- all_weeks_summary %>%
+  mutate(event_rate = event_count / Obs_Duration)  # 事件速率
+
+# 使用事件速率 (event_rate) 作为因变量拟合模型
+model_event_rate <- lmerTest::lmer(
+  event_rate ~ treatment + factor(week) + 
+    (1 | WGT/Colony.no.) + 
+    (1 | Air_Temp_Avg) + 
+    (1 | `RH (%) [Smp]`) + 
+    (1 | `WS_kph_ (kilometers/hour) [Avg]`) + 
+    (1 | `SlrW_Avg (W/m^2) [Avg]`),
+  data = all_weeks_summary
+)
+
+# 查看模型摘要
+summary(model_event_rate)
+
+# 计算VIF
+event_rate_vif_values <- vif(model_event_rate)
+print(event_rate_vif_values)
+
+# 检查模型的残差分布（正态性）
+residuals_event_rate <- resid(model_event_rate)
+shapiro_test_event_rate <- shapiro.test(residuals_event_rate)
+print(shapiro_test_event_rate)
+
+# 绘制残差 QQ 图
+qqnorm(residuals_event_rate)
+qqline(residuals_event_rate, col = "red")
+
+# 得到拟合值
+fitted_values_event_rate <- fitted(model_event_rate)
+
+# 构建线性模型对象，以便使用 bptest
+lm_model_event_rate <- lm(residuals_event_rate ~ fitted_values_event_rate)
+
+# 执行 Breusch-Pagan 方差齐性检验
+bp_test_event_rate <- bptest(lm_model_event_rate)
+print(bp_test_event_rate)
+
+plot(fitted(model_event_rate), residuals(model_event_rate),
+     main = "Residuals vs Fitted",
+     xlab = "Fitted Values",
+     ylab = "Residuals")
+abline(h = 0, col = "red", lwd = 2)
+
+# 计算 AIC 值以便与之前的模型进行比较
+pollen_aic_event_rate <- AIC(model_event_rate)
+print(paste("AIC of event rate model:", pollen_aic_event_rate))
+
+# 进行模型的Tukey事后检验
+tukey_result_event_rate <- glht(model_event_rate, linfct = mcp(treatment = "Tukey"))
+summary(tukey_result_event_rate)
+
+# 残差直方图
+hist(residuals_event_rate, breaks = 20, main = "Histogram of Residuals", xlab = "Residuals")
+
+# 计算 R 方
+event_r_squared <- r.squaredGLMM(model_event_rate)
+print(event_r_squared)
+
+#lost
+# 计算新权重（观测数的平方根）(二选一)
+all_weeks_summary_weight <- all_weeks_summary %>%
+  mutate(new_weight = sqrt(event_count))
+# 筛选事件数大于或等于40的数据(二选一)
+all_weeks_summary_filter <- all_weeks_summary %>%
+  filter(event_count >= 40)
+
+
+# 使用迷失率 (lost_rate) 作为因变量拟合模型
+model_lost_rate <- lmer(
+  lost_rate ~ treatment + factor(week) + 
+    (1 | WGT/Colony.no.) + 
+    (1 | Air_Temp_Avg) + 
+    (1 | `RH (%) [Smp]`) + 
+    (1 | `WS_kph_ (kilometers/hour) [Avg]`) + 
+    (1 | `SlrW_Avg (W/m^2) [Avg]`),
+  data = all_weeks_summary_filter,
+)
+
+# 查看模型摘要
+summary(model_lost_rate)
+
+# 计算VIF
+lost_rate_vif_values <- vif(model_lost_rate)
+print(lost_rate_vif_values)
+
+# 检查模型的残差分布（正态性）
+residuals_lost_rate <- resid(model_lost_rate)
+shapiro_test_lost_rate <- shapiro.test(residuals_lost_rate)
+print(shapiro_test_lost_rate)
+
+# 绘制残差 QQ 图
+qqnorm(residuals_lost_rate)
+qqline(residuals_lost_rate, col = "red")
+
+# 得到拟合值
+fitted_values_lost_rate <- fitted(model_lost_rate)
+
+# 构建线性模型对象，以便使用 bptest
+lm_model_lost_rate <- lm(residuals_lost_rate ~ fitted_values_lost_rate)
+
+# 执行 Breusch-Pagan 方差齐性检验
+bp_test_lost_rate <- bptest(lm_model_lost_rate)
+print(bp_test_lost_rate)
+
+plot(fitted(model_lost_rate), residuals(model_lost_rate),
+     main = "Residuals vs Fitted",
+     xlab = "Fitted Values",
+     ylab = "Residuals")
+abline(h = 0, col = "red", lwd = 2)
+
+# 计算 AIC 值以便与之前的模型进行比较
+lost_rate_aic <- AIC(model_lost_rate)
+print(paste("AIC of lost rate model:", lost_rate_aic))
+
+# 进行模型的Tukey事后检验
+tukey_result_lost_rate <- glht(model_lost_rate, linfct = mcp(treatment = "Tukey"))
+summary(tukey_result_lost_rate)
+
+# 残差直方图
+hist(residuals_lost_rate, breaks = 20, main = "Histogram of Residuals", xlab = "Residuals")
+
+# 计算 R 方
+lost_rate_r_squared <- r.squaredGLMM(model_lost_rate)
+print(lost_rate_r_squared)
