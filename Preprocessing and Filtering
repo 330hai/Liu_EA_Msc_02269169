@@ -1,0 +1,187 @@
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(readr)
+library(tidyr)
+# 设置工作目录
+setwd("C:/Users/79098/Desktop/Bumblebee_Data")
+# 读取实验数据
+week1 <- read_excel("week1_records.xlsx")
+week2 <- read_excel("week2_records.xlsx")
+week3 <- read_excel("week3_records.xlsx")
+week4 <- read_excel("week4_records.xlsx")
+
+# 读取注释数据
+notes1 <- read_excel("week1_notes.xlsx")
+notes2 <- read_excel("week2_notes.xlsx")
+notes3 <- read_excel("week3_notes.xlsx")
+notes4 <- read_excel("week4_notes.xlsx")
+
+# 合并活动记录和注释数据，并处理观测时长
+week1 <- left_join(week1, notes1, by = "Colony.no.") %>%
+  mutate(Obs_Duration = ifelse(is.na(Obs_Duration), 3600, Obs_Duration))
+
+week2 <- left_join(week2, notes2, by = "Colony.no.") %>%
+  mutate(Obs_Duration = ifelse(is.na(Obs_Duration), 3600, Obs_Duration))
+
+week3 <- left_join(week3, notes3, by = "Colony.no.") %>%
+  mutate(Obs_Duration = ifelse(is.na(Obs_Duration), 3600, Obs_Duration))
+
+week4 <- left_join(week4, notes4, by = "Colony.no.") %>%
+  mutate(Obs_Duration = ifelse(is.na(Obs_Duration), 3600, Obs_Duration))
+
+# 将携带花粉的事件转换为二元变量
+week1 <- week1 %>% mutate(Pollen_foraging_binary = ifelse(Pollen_foraging == "yes", 1, ifelse(Pollen_foraging == "no", 0, NA)))
+week2 <- week2 %>% mutate(Pollen_foraging_binary = ifelse(Pollen_foraging == "yes", 1, ifelse(Pollen_foraging == "no", 0, NA)))
+week3 <- week3 %>% mutate(Pollen_foraging_binary = ifelse(Pollen_foraging == "yes", 1, ifelse(Pollen_foraging == "no", 0, NA)))
+week4 <- week4 %>% mutate(Pollen_foraging_binary = ifelse(Pollen_foraging == "yes", 1, ifelse(Pollen_foraging == "no", 0, NA)))
+
+week1 <- week1 %>% 
+  mutate(weight = ifelse(Obs_Duration < 360, 0, 3600 / Obs_Duration))
+
+week2 <- week2 %>% 
+  mutate(weight = ifelse(Obs_Duration < 360, 0, 3600 / Obs_Duration))
+
+week3 <- week3 %>% 
+  mutate(weight = ifelse(Obs_Duration < 360, 0, 3600 / Obs_Duration))
+
+week4 <- week4 %>% 
+  mutate(weight = ifelse(Obs_Duration < 360, 0, 3600 / Obs_Duration))
+
+# 数据预处理：添加二元变量表示进出事件
+week1 <- week1 %>%
+  mutate(enter_exit_binary = ifelse(Event %in% c("entrance_none", "entrance_pollen"), 1, ifelse(Event == "exit", 0, NA)))
+
+week2 <- week2 %>%
+  mutate(enter_exit_binary = ifelse(Event %in% c("entrance_none", "entrance_pollen"), 1, ifelse(Event == "exit", 0, NA)))
+
+week3 <- week3 %>%
+  mutate(enter_exit_binary = ifelse(Event %in% c("entrance_none", "entrance_pollen"), 1, ifelse(Event == "exit", 0, NA)))
+
+week4 <- week4 %>%
+  mutate(enter_exit_binary = ifelse(Event %in% c("entrance_none", "entrance_pollen"), 1, ifelse(Event == "exit", 0, NA)))
+
+
+# 读取气候数据
+weather_data <- read_csv("SilwoodWeatherHourly.csv")
+
+# 转换气候数据中的时间戳为POSIXct格式，并添加结束时间列
+weather_data <- weather_data %>%
+  mutate(Start_Time = as.POSIXct(TIMESTAMP, format="%d/%m/%Y %H:%M"),
+         End_Time = Start_Time + minutes(59))
+
+# 函数：根据时间范围匹配气候数据
+combine_weather <- function(week_data, weather_data) {
+  # 创建实验数据的日期时间列
+  week_data <- week_data %>%
+    mutate(DateTime = as.POSIXct(paste(Date_footage, format(Video_time_stamp, "%H:%M:%S")), format="%Y-%m-%d %H:%M:%S"))
+  
+  # 初始化新的气候数据列
+  weather_columns <- colnames(weather_data)[-which(colnames(weather_data) %in% c("TIMESTAMP", "Start_Time", "End_Time"))]
+  week_data[weather_columns] <- NA
+  
+  # 根据时间范围匹配气候数据
+  for (i in 1:nrow(week_data)) {
+    matching_weather <- weather_data %>%
+      filter(week_data$DateTime[i] >= Start_Time & week_data$DateTime[i] <= End_Time)
+    
+    if (nrow(matching_weather) > 0) {
+      for (col in weather_columns) {
+        week_data[i, col] <- matching_weather[[col]]
+      }
+    }
+  }
+  
+  return(week_data)
+}
+
+# 结合每周数据
+week1_final <- combine_weather(week1, weather_data)
+week2_final <- combine_weather(week2, weather_data)
+week3_final <- combine_weather(week3, weather_data)
+week4_final <- combine_weather(week4, weather_data)
+
+# 添加周信息
+week1_final$week <- 1
+week2_final$week <- 2
+week3_final$week <- 3
+week4_final$week <- 4
+
+# 替换 treatment A, B, C 为相应的简称
+replace_treatment_names <- function(df) {
+  df$treatment <- recode(df$treatment,
+                         "A" = "Strep",
+                         "B" = "Prothio",
+                         "C" = "Control")
+  return(df)
+}
+# 替换每周的数据
+week1_final <- replace_treatment_names(week1_final)
+week2_final <- replace_treatment_names(week2_final)
+week3_final <- replace_treatment_names(week3_final)
+week4_final <- replace_treatment_names(week4_final)
+
+# 查看合并后的数据
+head(week1_final)
+head(week2_final)
+head(week3_final)
+head(week4_final)
+
+# 合并所有周的数据
+all_weeks_final <- bind_rows(week1_final, week2_final, week3_final, week4_final)
+
+# 保存每周的最终数据文件
+write.csv(week1_final, "week1_final.csv", row.names = FALSE)
+write.csv(week2_final, "week2_final.csv", row.names = FALSE)
+write.csv(week3_final, "week3_final.csv", row.names = FALSE)
+write.csv(week4_final, "week4_final.csv", row.names = FALSE)
+
+
+# 保存合并后的数据
+write.csv(all_weeks_final, "all_weeks_final.csv", row.names = FALSE)
+# 定义计算 summary 表格的函数
+calculate_summary <- function(data) {
+  # 计算 summary 表格
+  summary_df <- data %>%
+    group_by(Colony.no.) %>%
+    summarise(
+      Obs_Duration = mean(Obs_Duration),  # 取每个Colony的平均观察时间
+      event_count = n(),  # 计算每个Colony的事件数
+      event_rate = event_count / Obs_Duration,  # 计算事件速率
+      pollen_carrying_rate = sum(Pollen_foraging_binary, na.rm = TRUE) / sum(Activity == 1 & !is.na(Pollen_foraging_binary), na.rm = TRUE),  # 计算花粉携带率
+      enter_count = sum(Activity == 1, na.rm = TRUE),  # 进入事件数
+      exit_count = sum(Activity == 0, na.rm = TRUE),  # 出去事件数
+      lost_rate = (exit_count - enter_count) / exit_count  # 计算迷失率
+    )
+  
+  # 根据 Colony.no. 来匹配其他变量
+  colony_info <- data %>%
+    filter(Standardized_time == 0) %>%
+    dplyr::select(Colony.no., WGT, treatment, `Air_Temp_Avg`, `RH (%) [Smp]`, 
+                  `WS_kph_ (kilometers/hour) [Avg]`, `SlrW_Avg (W/m^2) [Avg]`, weight, week)
+  
+  # 将这些信息合并到 summary 表格中
+  summary_df <- summary_df %>%
+    left_join(colony_info, by = "Colony.no.")
+  
+  # 将非零的权重都设为1，并且过滤掉你想要摒弃的视频
+  summary_df <- summary_df %>%
+    mutate(weight = ifelse(Obs_Duration >= 360, 1, 0))  # 摒弃观测时间少于6分钟的记录
+  
+  return(summary_df)
+}
+
+# 读取每周的数据
+week1_summary <- calculate_summary(week1_final)
+week2_summary <- calculate_summary(week2_final)
+week3_summary <- calculate_summary(week3_final)
+week4_summary <- calculate_summary(week4_final)
+
+
+# 合并所有周的数据
+all_weeks_summary <- bind_rows(week1_summary, week2_summary, week3_summary, week4_summary)
+
+
+#转换数据类型
+all_weeks_summary$WGT <- as.factor(all_weeks_summary$WGT)
+all_weeks_summary$Colony.no. <- as.factor(all_weeks_summary$Colony.no.)
